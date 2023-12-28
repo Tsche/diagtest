@@ -1,0 +1,2 @@
+# diagtest
+compiler diagnostics testing
