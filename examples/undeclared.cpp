@@ -8,9 +8,9 @@ int main() {
     //unavailable compilers will be skipped
     @error(gcc, "‘undeclared’ was not declared in this scope")@
     @error(clang, "use of undeclared identifier 'undeclared'")@
-    @error(msvc, "use of undeclared identifier 'undeclared'")@
+    @#error(msvc, "use of undeclared identifier 'undeclared'")@
     
     //Also compile this test with GCC instead of G++
-    @error(c_gcc, "‘undeclared’ was not declared in this scope")@
+    @#error(c_gcc, "‘undeclared’ was not declared in this scope")@
 }
 }

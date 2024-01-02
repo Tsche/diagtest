@@ -67,8 +67,12 @@ class Test:
             print(f"{compiler} {assertions}")
             for result in compiler.execute(source, self.identifier):
                 for assertion in assertions:
-                    result = assertion.check(result)
-                    echo(style("    PASS", fg="green") if result else style("    FAIL", fg="red"))
+                    success = assertion.check(result)
+                    echo(style("    PASS", fg="green") if success else style("    FAIL", fg="red"))
+                    if not success:
+                        print(result.command)
+                        print(result.stdout)
+                        print(result.stderr)
 
 
 class Parser:

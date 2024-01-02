@@ -93,13 +93,14 @@ def find_executable(executable: Optional[Path | str] = None, default: Optional[s
     return which(executable or default)
 
 
-def run(command: list[str]):
+def run(command: list[str]|str, env: Optional[dict[str, str]] = None):
     return subprocess.run(
         command,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         universal_newlines=True,
-        check=False
+        check=False,
+        env=env
     )
 
 

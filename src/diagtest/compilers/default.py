@@ -1,4 +1,14 @@
-# load all other modules in this package and grab defaults
-from diagtest.compilers.c_cpp import defaults as c_cpp_defaults
+from functools import cache
 
-defaults = {**c_cpp_defaults}
+from diagtest.compilers.gcc import GCC
+from diagtest.compilers.clang import Clang
+from diagtest.compilers.msvc import MSVC
+
+def discover():
+    compilers = [GCC, Clang, MSVC]
+    for compiler in compilers:
+        name = compiler.__name__.lower()
+        print(compiler.discover())
+
+if __name__ == "__main__":
+    discover()
