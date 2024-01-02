@@ -41,8 +41,8 @@ class Runner:
             self.source = preprocessed_source
 
     def run(self):
-        for test in self.tests:
-            test.run(self.source)
+        success = all(test.run(self.source) for test in self.tests)
+        return success
 
 
 @dataclass
@@ -59,6 +59,7 @@ class Test:
 
     def run(self, source: Path):
         print(f"Test '{self.name}'")
+        failed = False
         for compiler, assertions in self.assertions.items():
             if not compiler.available:
                 #logging.warning("Skipping %s because it is not available.", compiler)
@@ -67,24 +68,22 @@ class Test:
             print(f"  Compiler group {compiler}")
             results: dict[Assertion, list[tuple[str, bool, Report]]] = defaultdict(list)
             for name, result in compiler.execute(source, self.identifier):
-                failed = False
                 for assertion in assertions:
                     success = assertion.check(result)
                     results[assertion].append((name, success, result))
-
-                    if not success:
-                        failed = True
-
-                if failed:
-                    logging.error(f"Command failed: {result.command}")
-                    print("STDOUT\n",result.stdout)
-                    print("STDERR\n", result.stderr)
 
             for assertion, runs in results.items():
                 print(f"    {assertion}")
                 for name, success, result in runs:
                     message = style("PASS", fg="green") if success else style("FAIL", fg="red")
                     print(f"      {name}: {message}")
+                    if not success:
+                        failed = True
+                        logging.error(f"Command: {result.command}")
+                        print("STDOUT\n",result.stdout)
+                        print("STDERR\n", result.stderr)
+                        print(result.diagnostics)
+        return failed
 
 
 
@@ -146,6 +145,7 @@ class Parser:
         @change_repr(report_usage_error)
         def wrap(code: str):
             nonlocal this_test
+            # TODO this is language dependent
             return f"\n#ifdef {this_test.identifier}\n{code}\n#endif"
 
         return wrap

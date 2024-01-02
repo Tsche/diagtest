@@ -26,5 +26,4 @@ def main(files: list[Path], list_compilers=False, verbose=False, output: Optiona
     if not files:
         raise RuntimeError("Input files missing")
 
-    for path in files:
-        Runner(path, output).run()
+    return all(Runner(path, output).run() for path in files)
