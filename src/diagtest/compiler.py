@@ -4,7 +4,7 @@ import time
 import logging
 
 from pathlib import Path
-from abc import ABC
+from abc import ABC, abstractmethod
 from collections import UserList, defaultdict
 from typing import Optional, Iterable, Type
 from dataclasses import dataclass, field
@@ -246,3 +246,12 @@ class VersionedCompiler(Compiler):
             compilers.append(CompilerInfo(executable, version['version'], version['target']))
 
         return compilers
+
+    @staticmethod
+    @abstractmethod
+    def get_version(path: Path):
+        raise NotImplementedError()
+
+    def __str__(self):
+        version = self.get_version(self.compiler)
+        return f"{super().__str__()} ({version['version']}, {version['target']})"

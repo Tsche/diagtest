@@ -18,8 +18,7 @@ class GCC(MultilingualCompiler):
 
     def execute(self, file: Path, test_id: str):
         for standard in self.selected_standards:
-            version = self.get_version(self.compiler)
-            name = f"{str(self)} ({version['version']}, {version['target']}) ({standard})"
+            name = f"{str(self)} ({standard})"
             yield name, self.compile(file, [f"-std={standard}", *(self.options or []), f"-D{test_id}"])
 
     @staticmethod

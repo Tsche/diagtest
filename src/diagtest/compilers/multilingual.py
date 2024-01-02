@@ -72,4 +72,3 @@ class MultilingualCompiler(VersionedCompiler):
             return flatten(self.filter_standards(query))
 
         return [self.expand_standard(query)]
-
