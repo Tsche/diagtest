@@ -1,4 +1,6 @@
 import re
+import os
+import logging
 from pathlib import Path
 from functools import cache
 from collections import defaultdict
@@ -26,7 +28,7 @@ class GCC(MultilingualCompiler):
     def get_version(compiler: Path):
         # invoke gcc -v --version
         env = os.environ.copy()
-        env['COLUMNS'] = 1024
+        env['COLUMNS'] = "1024"
         result = run([str(compiler), "-v", "--version"], env=env)
         version: dict[str, str] = {}
         for match in re.finditer(GCC.version_pattern, result.stderr):
