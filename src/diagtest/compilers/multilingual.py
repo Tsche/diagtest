@@ -1,33 +1,18 @@
-from enum import Enum
 from typing import Optional
 from pathlib import Path
 
-from diagtest.compiler import Compiler
-
-class Language(Enum):
-    C = 'c'
-    GNU_C = 'gnu'
-    CPP = 'c++'
-    GNU_CPP = 'gnu++'
-
-    @property
-    def is_cpp(self):
-        return self in (Language.CPP, Language.GNU_CPP)
-
+from diagtest.compiler import VersionedCompiler
 
 standard_query = str | int | list[int | str] | tuple[str, str]
-class MultilingualCompiler(Compiler):
-    def __init__(self, language: Language, *args, std: Optional[standard_query] = None, **kwargs):
+class MultilingualCompiler(VersionedCompiler):
+    def __init__(self, language: str, std: Optional[standard_query] = None, **kwargs):
         self.language = language
-        super().__init__(*args, **kwargs)
-        if hasattr(self, 'get_supported_standards'):
-            self.standards: dict[Language, list[tuple[str, ...]]] = self.get_supported_standards(self.compiler)
-        else:
-            self.standards = {}
+        super().__init__(**kwargs)
+        self.standards: dict[str, list[tuple[str, ...]]] = self.get_supported_standards(self.compiler)
         assert language in self.standards, f"No supported standards for language {language.name}"
         self.selected_standards = self.get_standards(std)
 
-    def __call__(self, language: Optional[Language] = None, std: Optional[standard_query] = None,  # type: ignore[override]
+    def __call__(self, language: Optional[str] = None, std: Optional[standard_query] = None,  # type: ignore[override]
                  options: Optional[list[str]] = None, executable: Optional[Path | str] = None):
         return type(self)(language=language or self.language,
                           std=std or self.selected_standards,
@@ -88,7 +73,3 @@ class MultilingualCompiler(Compiler):
 
         return [self.expand_standard(query)]
 
-    def execute(self, file: Path, test_id: str):
-        for standard in self.selected_standards:
-            print(f"    Standard {standard}", end='')
-            yield self.compile(file, [f"-std={standard}", *(self.options or []), f"-D{test_id}"])

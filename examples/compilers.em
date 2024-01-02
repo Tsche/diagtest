@@ -1,5 +1,5 @@
 @{
-from diagtest.compilers.c_cpp import GCC, Language
+from diagtest.compilers.gcc import GCC
 
 # compile C++ code with GCC instead of G++
 # to do this we need to grab GCC in C mode and reconfigure it

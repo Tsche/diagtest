@@ -6,12 +6,12 @@ from pathlib import Path
 from typing import Optional, Any
 
 import em
-from click import echo, style
+from click import style
 
-from diagtest.assertion import Assertion, Message, ReturnCode
-from diagtest.compiler import Compiler, Level
+from diagtest.assertion import Assertion, Message, ReturnCode, ErrorCode
+from diagtest.compiler import Compiler, Level, Report
 from diagtest.exceptions import UsageError
-
+from diagtest.default import get_defaults
 
 def change_repr(repr_fnc):
     class ReprWrapper:
@@ -58,21 +58,34 @@ class Test:
         self.assertions[compiler].append(assertion)
 
     def run(self, source: Path):
-        print(f"Test {self.name}")
+        print(f"Test '{self.name}'")
         for compiler, assertions in self.assertions.items():
             if not compiler.available:
-                logging.warning("Skipping %s because it is not available.", compiler)
+                #logging.warning("Skipping %s because it is not available.", compiler)
                 continue
 
-            print(f"{compiler} {assertions}")
-            for result in compiler.execute(source, self.identifier):
+            print(f"  Compiler group {compiler}")
+            results: dict[Assertion, list[tuple[str, bool, Report]]] = defaultdict(list)
+            for name, result in compiler.execute(source, self.identifier):
+                failed = False
                 for assertion in assertions:
                     success = assertion.check(result)
-                    echo(style("    PASS", fg="green") if success else style("    FAIL", fg="red"))
+                    results[assertion].append((name, success, result))
+
                     if not success:
-                        print(result.command)
-                        print(result.stdout)
-                        print(result.stderr)
+                        failed = True
+
+                if failed:
+                    logging.error(f"Command failed: {result.command}")
+                    print("STDOUT\n",result.stdout)
+                    print("STDERR\n", result.stderr)
+
+            for assertion, runs in results.items():
+                print(f"    {assertion}")
+                for name, success, result in runs:
+                    message = style("PASS", fg="green") if success else style("FAIL", fg="red")
+                    print(f"      {name}: {message}")
+
 
 
 class Parser:
@@ -82,6 +95,7 @@ class Parser:
             "update_globals": self.update_globals,
             "load_defaults": self.load_defaults,
             "test": self.test,
+            "error_code": self.error_code,
             "return_code": self.return_code,
             "note": self.note,
             "warning": self.warning,
@@ -111,12 +125,12 @@ class Parser:
         self.interpreter.include(str(path.resolve()))
 
     def load_defaults(self, language: str):
-        from diagtest.compilers.default import defaults
         language = language.lower()
-        if language not in defaults:
+        defaults = get_defaults(language)
+        if not defaults:
             logging.warning("Could not find defaults for language %s", language)
             return
-        self.update_globals(defaults.get(language, {}))
+        self.update_globals(defaults)
 
     def update_globals(self, new_globals: dict[str, Any]):
         self.interpreter.updateGlobals(new_globals)
@@ -132,12 +146,15 @@ class Parser:
         @change_repr(report_usage_error)
         def wrap(code: str):
             nonlocal this_test
-            return f"#ifdef {this_test.identifier}\n{code}\n#endif"
+            return f"\n#ifdef {this_test.identifier}\n{code}\n#endif"
 
         return wrap
 
     def return_code(self, compiler: Compiler, code: int):
         self.tests[-1].add_assertion(compiler, ReturnCode(code))
+
+    def error_code(self, compiler: Compiler, code: str):
+        self.tests[-1].add_assertion(compiler, ErrorCode(code))
 
     def note(
         self,

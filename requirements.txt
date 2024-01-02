@@ -1,3 +1,4 @@
 colorama>=0.4.6
 click>=8.1.0
 empy>=4.0.0
+packaging>=23.2

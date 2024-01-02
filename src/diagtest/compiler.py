@@ -1,18 +1,20 @@
 import subprocess
-import platform as platform_info
-import shutil
 import re
 import time
-
+import logging
 
 from pathlib import Path
 from abc import ABC
 from collections import UserList, defaultdict
-from typing import Optional, Iterable
+from typing import Optional, Iterable, Type
 from dataclasses import dataclass, field
 from enum import Enum
-from functools import lru_cache
+from functools import cache
 
+from packaging.version import Version
+from packaging.specifiers import SpecifierSet
+
+from diagtest.util import find_executables
 
 class Collection(UserList):
     def __or__(self, other):
@@ -26,6 +28,23 @@ class Collection(UserList):
         for compiler in self.data:
             yield from compiler.compile(file, args)
 
+    def execute(self, file: Path, test_id: str):
+        for compiler in self.data:
+            yield from compiler.execute(file, test_id)
+
+    @property
+    def available(self):
+        return len(self.data) != 0
+
+    def __hash__(self):
+        return hash(iter(self))
+
+    def __str__(self):
+        if len(self.data) == 1:
+            return str(self.data[0])
+
+        compilers = ', '.join(str(data) for data in self.data)
+        return f"[{compilers}]"
 
 class Level(Enum):
     note = "note"
@@ -76,23 +95,6 @@ class Report:
     def elapsed_s(self):
         return self.elapsed / 1e9
 
-
-@lru_cache(maxsize=None)
-def which(name: str | None):
-    if name is None:
-        return
-
-    result = shutil.which(name)
-    if result is not None:
-        return Path(result)
-
-
-def find_executable(executable: Optional[Path | str] = None, default: Optional[str] = None):
-    if isinstance(executable, Path):
-        return executable
-    return which(executable or default)
-
-
 def run(command: list[str]|str, env: Optional[dict[str, str]] = None):
     return subprocess.run(
         command,
@@ -107,11 +109,12 @@ def run(command: list[str]|str, env: Optional[dict[str, str]] = None):
 class Compiler(ABC):
     def __init__(
         self,
+        executable: Path,
         options: Optional[list[str]] = None,
-        executable: Optional[Path | str] = None
+        **_ # ignore excess keyword arguments
     ):
         self.options = options or []
-        self.compiler = find_executable(executable, getattr(self, 'executable'))
+        self.compiler = executable
         self.diagnostic_pattern = getattr(self, 'diagnostic_pattern')  # hack to make mypy happy
         assert self.diagnostic_pattern is not None, "Compiler definition lacks a diagnostic pattern"
 
@@ -119,15 +122,8 @@ class Compiler(ABC):
             # compile the pattern if it hasn't yet happened
             self.diagnostic_pattern = re.compile(self.diagnostic_pattern)
 
-    def __call__(self, options: Optional[list[str]] = None, executable: Optional[Path | str] = None):
+    def __call__(self, options: Optional[list[str]] = None, executable: Optional[Path] = None):
         return type(self)(options=options or self.options, executable=executable or self.compiler)
-
-    @property
-    def available(self):
-        if (platform := getattr(self, 'platform', None)) is not None:
-            if platform_info.system() != platform:
-                return False
-        return self.compiler is not None
 
     def extract_diagnostics(self, lines):
         for line in lines.splitlines():
@@ -167,7 +163,7 @@ class Compiler(ABC):
         return result
 
     def execute(self, file: Path, test_id: str):
-        yield self.compile(file, [*(self.options or []), f"-D{test_id}"])
+        raise NotImplementedError()
 
     def __or__(self, other):
         if isinstance(other, (list, Collection)):
@@ -177,3 +173,76 @@ class Compiler(ABC):
 
     def __str__(self):
         return type(self).__name__
+
+    @property
+    def available(self):
+        return True
+
+@dataclass
+class CompilerInfo:
+    executable: Path
+    version: Version
+    target: str
+
+class CompilerCollection(UserList[CompilerInfo]):
+    def by_version(self, specifier: SpecifierSet):
+        for compiler in self.data:
+            if compiler.version in specifier:
+                yield compiler
+
+    def by_target(self, target: str | re.Pattern):
+        def matches(compiler):
+            if isinstance(target, str):
+                return compiler.target == target
+            elif isinstance(target, re.Pattern):
+                return re.match(target, compiler.target)
+            raise RuntimeError("Target must be string or regex pattern")
+
+        for compiler in self.data:
+            if matches(compiler):
+                yield compiler
+
+    def by_executable(self, executable: Path):
+        for compiler in self.data:
+            if compiler.executable == executable:
+                yield compiler
+
+class VersionedCompiler(Compiler):
+    def __new__(cls: Type['VersionedCompiler'],
+                executable: Optional[Path] = None,
+                options: Optional[list[str]] = None,
+                version: Optional[SpecifierSet | str] = None,
+                target: Optional[str | re.Pattern] = None,
+                **kwargs):
+        def init(binary: Path):
+            nonlocal options
+            obj = object.__new__(cls)
+            cls.__init__(obj, executable=binary, options=options, **kwargs)
+            return obj
+
+        if executable is not None:
+            return init(executable)
+
+        compilers = CompilerCollection(cls.discover())
+        if version is not None:
+            version = SpecifierSet(version) if isinstance(version, str) else version
+            compilers = CompilerCollection(compilers.by_version(version))
+        if target is not None:
+            compilers = CompilerCollection(compilers.by_target(target))
+
+        return Collection([init(compiler.executable) for compiler in compilers])
+
+    @classmethod
+    @cache
+    def discover(cls):
+        assert hasattr(cls, 'executable_pattern')
+        assert hasattr(cls, 'get_version')
+        compilers: list[CompilerInfo] = []
+        for executable in find_executables(getattr(cls, 'executable_pattern')):
+            version = getattr(cls, 'get_version')(executable)
+            if 'version' not in version or 'target' not in version:
+                logging.warning("Invalid compiler: %s", executable)
+                continue
+            compilers.append(CompilerInfo(executable, version['version'], version['target']))
+
+        return compilers

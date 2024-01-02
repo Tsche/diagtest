@@ -1,21 +1,25 @@
-import shutil
 import re
 from pathlib import Path
 from functools import cache
 from collections import defaultdict
 
-from diagtest.compilers.multilingual import MultilingualCompiler, Language
+from diagtest.compilers.multilingual import MultilingualCompiler
 from diagtest.compiler import run
+
+
 class GCC(MultilingualCompiler):
-    diagnostic_pattern = r"^((?P<path>[a-zA-Z0-9:\/\\\.]*?):((?P<line>[0-9]+):)?((?P<column>[0-9]+):)? )"\
+    diagnostic_pattern = r"^((?P<path>[^:]*?):((?P<line>[0-9]+):)?((?P<column>[0-9]+):)? )"\
                          r"?((?P<level>error|warning|note): )(?P<message>.*)$"
 
     version_pattern = re.compile(r"((Target: (?P<target>.*))|(Thread model: (?P<thread_model>.*))|"
                                  r"((gcc|clang) version (?P<version>[0-9\.]+)))")
+    executable_pattern = r"^gcc(-[0-9]+)?(\.exe|\.EXE)?$"
 
-    def __init__(self, language: Language, *args, **kwargs):
-        self.executable = "g++" if language.is_cpp else "gcc"
-        super().__init__(language, *args, **kwargs)
+    def execute(self, file: Path, test_id: str):
+        for standard in self.selected_standards:
+            version = self.get_version(self.compiler)
+            name = f"{str(self)} ({version['version']}, {version['target']}) ({standard})"
+            yield name, self.compile(file, [f"-std={standard}", *(self.options or []), f"-D{test_id}"])
 
     @staticmethod
     @cache
@@ -71,12 +75,4 @@ class GCC(MultilingualCompiler):
                 last_century[index_c99], last_century[index_iso94] = last_century[index_iso94], last_century[index_c99]
             result[language] = [*last_century, *standards[:idx]]
 
-        return {Language(key): value for key, value in result.items()}
-
-    @staticmethod
-    @cache
-    def discover():
-        default = shutil.which('gcc')
-        version = GCC.get_version(default)
-        standards = GCC.get_supported_standards(default)
-        return {default: {'version': version['version'], 'target': version['target'], 'standards': standards}}
+        return result

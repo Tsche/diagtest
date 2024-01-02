@@ -28,7 +28,7 @@ class Message:
     def __repr__(self):
         return f"REQUIRE {self.level.name}{' MATCHES' if self.regex else ''}: {self.text}"
 
-@dataclass
+@dataclass(frozen=True)
 class ReturnCode:
     expected: int
 
@@ -38,7 +38,7 @@ class ReturnCode:
     def __repr__(self):
         return f"RETURNS {self.expected}"
 
-@dataclass
+@dataclass(frozen=True)
 class ErrorCode:
     expected: str
 

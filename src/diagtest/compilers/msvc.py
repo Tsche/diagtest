@@ -6,10 +6,9 @@ import platform
 from functools import cache
 from pathlib import Path
 from enum import Enum
-from typing import Any
 
-from diagtest.compilers.multilingual import MultilingualCompiler, Language
-from diagtest.compiler import run
+from diagtest.compilers.multilingual import MultilingualCompiler
+from diagtest.compiler import run, CompilerInfo
 
 class VsArch(Enum):
     x86 = 'x86'
@@ -17,8 +16,14 @@ class VsArch(Enum):
 
 class MSVC(MultilingualCompiler):
     executable = "cl"
-    diagnostic_pattern = r"^((?P<path>[a-zA-Z0-9:\/\\\.]*?)\((?P<line>[0-9]+)\): )"\
+    diagnostic_pattern = r"^((?P<path>[a-zA-Z0-9:\/\\\._-]*?)\((?P<line>[0-9]+)\): )"\
                          r"((?P<level>fatal error|error|warning) )((?P<error_code>[A-Z][0-9]+): )(?P<message>.*)$"
+
+    def execute(self, file: Path, test_id: str):
+        for standard in self.selected_standards:
+            version = self.get_version(self.compiler)
+            name = f"{str(self)} ({version['version']}, {version['target']}) ({standard})"
+            yield name, self.compile(file, [f"/std:{standard}", *(self.options or []), f"/D{test_id}"])
 
     @staticmethod
     @cache
@@ -71,9 +76,9 @@ class MSVC(MultilingualCompiler):
         assert result.returncode == 0, "Setting up environment failed"
         return dict([line.split("=", maxsplit=1) for line in result.stdout.splitlines()])
 
-    @staticmethod
+    @classmethod
     @cache
-    def discover():
+    def discover(cls):
         if platform.system() != "Windows":
             # This compiler is not available on UNIX systems
             return {}
@@ -81,12 +86,13 @@ class MSVC(MultilingualCompiler):
         installation_info = MSVC.vswhere()
         logging.debug("Discovered %s version %s", installation_info['displayName'], installation_info['installationVersion'])
 
-        compilers: dict[str, Any] = {}
+        compilers: list[CompilerInfo] = []
         for arch in VsArch:
             env = MSVC.get_env(arch)
             compiler = shutil.which("cl", path=env['Path'])
-            assert compiler is not None
+            if compiler is None:
+                continue
+
             version = MSVC.get_version(compiler)
-            standards = MSVC.get_supported_standards(compiler)
-            compilers[compiler] = {'version': version['version'], 'target': version['target'], 'standards': standards}
+            compilers.append(CompilerInfo(Path(compiler), version['version'], version['target']))
         return compilers

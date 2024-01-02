@@ -1,19 +1,17 @@
 import re
-import shutil
 from pathlib import Path
 from functools import cache
 
-from diagtest.compilers.multilingual import MultilingualCompiler, Language
+from diagtest.compilers.multilingual import MultilingualCompiler
 from diagtest.compilers.gcc import GCC
 from diagtest.compiler import run
 
 class Clang(MultilingualCompiler):
     executable = "clang"
     diagnostic_pattern = GCC.diagnostic_pattern
+    executable_pattern = r"^clang(-[0-9]+)?(\.exe|\.EXE)?$"
 
-    def __init__(self, language: Language, *args, **kwargs):
-        self.executable = "clang++" if language.is_cpp else "clang"
-        super().__init__(language, *args, **kwargs)
+    execute = GCC.execute
 
     @staticmethod
     @cache
@@ -51,15 +49,5 @@ class Clang(MultilingualCompiler):
     @staticmethod
     @cache
     def get_supported_standards(compiler: Path):
-        return {Language(key): value
-                for key, value in {
-                    **Clang.filter_gnu(compiler, 'c'),
-                    **Clang.filter_gnu(compiler, 'c++')}.items()}
-
-    @staticmethod
-    @cache
-    def discover():
-        default = shutil.which('clang')
-        version = Clang.get_version(default)
-        standards = Clang.get_supported_standards(default)
-        return {default: {'version': version['version'], 'target': version['target'], 'standards': standards}}
+        return {**Clang.filter_gnu(compiler, 'c'),
+                **Clang.filter_gnu(compiler, 'c++')}
