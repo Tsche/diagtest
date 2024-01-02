@@ -20,9 +20,10 @@ class MSVC(MultilingualCompiler):
                          r"((?P<level>fatal error|error|warning) )((?P<error_code>[A-Z][0-9]+): )(?P<message>.*)$"
 
     def execute(self, file: Path, test_id: str):
+        env = self.get_env(VsArch[self.get_version(self.compiler)['target']])
         for standard in self.selected_standards:
             name = f"{str(self)} ({standard})"
-            yield name, self.compile(file, [f"/std:{standard}", *(self.options or []), f"/D{test_id}"])
+            yield name, self.compile(file, [f"/std:{standard}", *(self.options or []), f"/D{test_id}"], env=env)
 
     @staticmethod
     @cache
@@ -67,6 +68,9 @@ class MSVC(MultilingualCompiler):
     @staticmethod
     @cache
     def get_env(arch: VsArch):
+        if 'VSCMD_VER' in os.environ:
+            return None
+
         installation_info = MSVC.vswhere()
         setup_env = Path(installation_info['installationPath']) / "Common7" / "Tools" / "VsDevCmd.bat"
         cmd = f'cmd.exe /s /c "\"{setup_env}\" -arch={arch.value} >nul 2>&1 && set"'
@@ -80,7 +84,16 @@ class MSVC(MultilingualCompiler):
     def discover(cls):
         if platform.system() != "Windows":
             # This compiler is not available on UNIX systems
-            return {}
+            return []
+
+        if 'VSCMD_VER' in os.environ:
+            logging.debug("Developer VS Shell environment variables found. Skipping discovery.")
+            compiler = shutil.which("cl")
+            if compiler is None:
+                return []
+
+            version = MSVC.get_version(compiler)
+            return [CompilerInfo(Path(compiler), version['version'], version['target'])]
 
         installation_info = MSVC.vswhere()
         logging.debug("Discovered %s version %s", installation_info['displayName'], installation_info['installationVersion'])

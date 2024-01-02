@@ -24,9 +24,9 @@ class Collection(UserList):
             self.append(other)
         return self
 
-    def compile(self, file: Path, args: Optional[list[str]] = None):
+    def compile(self, file: Path, args: Optional[list[str]] = None, env: Optional[dict[str, str]]=None):
         for compiler in self.data:
-            yield from compiler.compile(file, args)
+            yield from compiler.compile(file, args, env)
 
     def execute(self, file: Path, test_id: str):
         for compiler in self.data:
@@ -144,11 +144,11 @@ class Compiler(ABC):
             level = Level(parts["level"])
             yield level, Diagnostic(parts["message"], source_location, parts.get("error_code", None))
 
-    def compile(self, file: Path | str, args: list[str]) -> Report:
+    def compile(self, file: Path | str, args: list[str], env: Optional[dict[str, str]]=None) -> Report:
         command = [str(self.compiler), *args, str(file)]
 
         start_time = time.monotonic_ns()
-        raw_result = run(command)
+        raw_result = run(command, env=env)
         end_time = time.monotonic_ns()
 
         result = Report(
