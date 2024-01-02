@@ -65,6 +65,9 @@ class GCC(MultilingualCompiler):
         # at least it is in order for both centuries, so do a little swapping here
         for language in 'c', 'gnu':
             standards = result[language]
+            if not standards:
+                continue
+
             idx = next(idx for idx, standard in enumerate(standards) if '9' in standard[0])
             last_century = standards[idx:]
 
