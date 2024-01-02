@@ -21,7 +21,7 @@ jobs:
         python-version: ${{ matrix.python-version }}
     - name: Install dependencies and package
       run: |
-        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+        pip install -r requirements.txt
         pip install -e .
     - name: Run example
-      run: diagtest example/undeclared.cpp
+      run: diagtest examples/undeclared.cpp
