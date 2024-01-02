@@ -26,7 +26,7 @@ class GCC(MultilingualCompiler):
     def get_version(compiler: Path):
         # invoke gcc -v --version
         result = run([str(compiler), "-v", "--version"])
-        print(result) #! TODO remove
+        print(result.stderr) #! TODO remove
         version: dict[str, str] = {}
         for match in re.finditer(GCC.version_pattern, result.stderr):
             version |= {k: v for k, v in match.groupdict().items() if v}
