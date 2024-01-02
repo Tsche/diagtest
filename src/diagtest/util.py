@@ -13,9 +13,5 @@ def find_executables(query: re.Pattern | str):
             continue
 
         for file in path.iterdir():
-            if file.is_symlink():
-                # TODO follow symlinks and ensure uniqueness of list later?
-                continue
-
             if query.match(file.name):
-                yield file
+                yield file.resolve()
