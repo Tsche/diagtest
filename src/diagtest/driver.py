@@ -41,8 +41,7 @@ class Runner:
             self.source = preprocessed_source
 
     def run(self):
-        success = all(test.run(self.source) for test in self.tests)
-        return success
+        return all(test.run(self.source) for test in self.tests)
 
 
 @dataclass
@@ -83,8 +82,7 @@ class Test:
                         print("STDOUT\n",result.stdout)
                         print("STDERR\n", result.stderr)
                         print(result.diagnostics)
-        return failed
-
+        return not failed
 
 
 class Parser:
