@@ -23,5 +23,9 @@ jobs:
       run: |
         pip install -r requirements.txt
         pip install -e .
+
+    - name: List compilers
+      run: diagtest --list-compilers
+
     - name: Run example
       run: diagtest examples/undeclared.cpp --verbose
