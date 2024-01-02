@@ -2,6 +2,7 @@ import re
 from pathlib import Path
 from functools import cache
 from collections import defaultdict
+from contextlib import suppress
 
 from diagtest.compilers.multilingual import MultilingualCompiler
 from diagtest.compiler import run
@@ -68,11 +69,12 @@ class GCC(MultilingualCompiler):
             last_century = standards[idx:]
 
             if language == 'c':
-                # iso9899:199409 is discovered after c99, but 1994 was before 1999
-                index_iso94 = next(idx for idx, standard in enumerate(last_century) if 'iso9899:199409' in standard)
-                index_c99 = next(idx for idx, standard in enumerate(last_century) if 'c99' in standard)
-                assert index_iso94 > index_c99, "Standards discovered in order. Please open an issue!"
-                last_century[index_c99], last_century[index_iso94] = last_century[index_iso94], last_century[index_c99]
+                with suppress(StopIteration):
+                    # iso9899:199409 is discovered after c99, but 1994 was before 1999
+                    index_iso94 = next(idx for idx, standard in enumerate(last_century) if 'iso9899:199409' in standard)
+                    index_c99 = next(idx for idx, standard in enumerate(last_century) if 'c99' in standard)
+                    assert index_iso94 > index_c99, "Standards discovered in order. Please open an issue!"
+                    last_century[index_c99], last_century[index_iso94] = last_century[index_iso94], last_century[index_c99]
             result[language] = [*last_century, *standards[:idx]]
 
         return result

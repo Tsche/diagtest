@@ -24,4 +24,4 @@ jobs:
         pip install -r requirements.txt
         pip install -e .
     - name: Run example
-      run: diagtest examples/undeclared.cpp
+      run: diagtest examples/undeclared.cpp --verbose
