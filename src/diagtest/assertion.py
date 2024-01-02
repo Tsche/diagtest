@@ -26,7 +26,7 @@ class Message:
         return any(check_one(diagnostic.message) for diagnostic in result.diagnostics[self.level])
 
     def __repr__(self):
-        return f"REQUIRE {self.level.name}{' MATCHES' if self.regex else ''}: {self.text}"
+        return f"REQUIRE {self.level.name}{' MATCHES' if self.regex else ''}: {str(self.text)}"
 
 @dataclass(frozen=True)
 class ReturnCode:

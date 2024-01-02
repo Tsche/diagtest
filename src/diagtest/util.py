@@ -14,4 +14,4 @@ def find_executables(query: re.Pattern | str):
 
         for file in path.iterdir():
             if query.match(file.name):
-                yield file
+                yield file.resolve()

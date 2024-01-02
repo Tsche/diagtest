@@ -2,6 +2,7 @@ import re
 from pathlib import Path
 from functools import cache
 from collections import defaultdict
+from contextlib import suppress
 
 from diagtest.compilers.multilingual import MultilingualCompiler
 from diagtest.compiler import run
@@ -17,8 +18,7 @@ class GCC(MultilingualCompiler):
 
     def execute(self, file: Path, test_id: str):
         for standard in self.selected_standards:
-            version = self.get_version(self.compiler)
-            name = f"{str(self)} ({version['version']}, {version['target']}) ({standard})"
+            name = f"{str(self)} ({standard})"
             yield name, self.compile(file, [f"-std={standard}", *(self.options or []), f"-D{test_id}"])
 
     @staticmethod
@@ -64,15 +64,19 @@ class GCC(MultilingualCompiler):
         # at least it is in order for both centuries, so do a little swapping here
         for language in 'c', 'gnu':
             standards = result[language]
+            if not standards:
+                continue
+
             idx = next(idx for idx, standard in enumerate(standards) if '9' in standard[0])
             last_century = standards[idx:]
 
             if language == 'c':
-                # iso9899:199409 is discovered after c99, but 1994 was before 1999
-                index_iso94 = next(idx for idx, standard in enumerate(last_century) if 'iso9899:199409' in standard)
-                index_c99 = next(idx for idx, standard in enumerate(last_century) if 'c99' in standard)
-                assert index_iso94 > index_c99, "Standards discovered in order. Please open an issue!"
-                last_century[index_c99], last_century[index_iso94] = last_century[index_iso94], last_century[index_c99]
+                with suppress(StopIteration):
+                    # iso9899:199409 is discovered after c99, but 1994 was before 1999
+                    index_iso94 = next(idx for idx, standard in enumerate(last_century) if 'iso9899:199409' in standard)
+                    index_c99 = next(idx for idx, standard in enumerate(last_century) if 'c99' in standard)
+                    assert index_iso94 > index_c99, "Standards discovered in order. Please open an issue!"
+                    last_century[index_c99], last_century[index_iso94] = last_century[index_iso94], last_century[index_c99]
             result[language] = [*last_century, *standards[:idx]]
 
         return result

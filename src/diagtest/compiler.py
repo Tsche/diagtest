@@ -4,7 +4,7 @@ import time
 import logging
 
 from pathlib import Path
-from abc import ABC
+from abc import ABC, abstractmethod
 from collections import UserList, defaultdict
 from typing import Optional, Iterable, Type
 from dataclasses import dataclass, field
@@ -238,7 +238,11 @@ class VersionedCompiler(Compiler):
         assert hasattr(cls, 'executable_pattern')
         assert hasattr(cls, 'get_version')
         compilers: list[CompilerInfo] = []
-        for executable in find_executables(getattr(cls, 'executable_pattern')):
+
+        def unique(iterable):
+            return [*{value: None for value in iterable}.keys()]
+
+        for executable in unique(find_executables(getattr(cls, 'executable_pattern'))):
             version = getattr(cls, 'get_version')(executable)
             if 'version' not in version or 'target' not in version:
                 logging.warning("Invalid compiler: %s", executable)
@@ -246,3 +250,12 @@ class VersionedCompiler(Compiler):
             compilers.append(CompilerInfo(executable, version['version'], version['target']))
 
         return compilers
+
+    @staticmethod
+    @abstractmethod
+    def get_version(path: Path):
+        raise NotImplementedError()
+
+    def __str__(self):
+        version = self.get_version(self.compiler)
+        return f"{super().__str__()} ({version['version']}, {version['target']})"
