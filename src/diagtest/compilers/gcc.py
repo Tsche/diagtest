@@ -25,7 +25,9 @@ class GCC(MultilingualCompiler):
     @cache
     def get_version(compiler: Path):
         # invoke gcc -v --version
-        result = run([str(compiler), "-v", "--version"])
+        env = os.environ.copy()
+        env['COLUMNS'] = 1024
+        result = run([str(compiler), "-v", "--version"], env=env)
         version: dict[str, str] = {}
         for match in re.finditer(GCC.version_pattern, result.stderr):
             version |= {k: v for k, v in match.groupdict().items() if v}
@@ -38,8 +40,7 @@ class GCC(MultilingualCompiler):
         standards = defaultdict(list)
         # invoke gcc -v --help
         result = run([str(compiler), "-v", "--help"])
-        print(result.stdout) #! TODO remove
-        #print(result.stderr) #! TODO remove
+        logging.error(result.stdout) #! TODO remove
         for line in result.stdout.splitlines():
             match = re.match(search_pattern, line)
             if match is None:
