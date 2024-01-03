@@ -37,7 +37,8 @@ class GCC(MultilingualCompiler):
 
     @staticmethod
     def get_standards_raw(compiler):
-        search_pattern = re.compile(r"-std=(?P<standard>[^\s]+)[\s]*(Conform.*((C|C\+\+)( draft)? standard))(.|(\n    )\s+)*Same.as(.|(\n    )\s+)*-std=(?P<alias>[^\. ]+)")
+        search_pattern = re.compile(r"-std=(?P<standard>[^\s]+)[\s]*(Conform.*((C|C\+\+)( draft)? standard))"
+                                    r"((.|(\n    )\s+)*Same.as(.|(\n    )\s+)*-std=(?P<alias>[^\. ]+))?")
         standards = defaultdict(list)
         # invoke gcc -v --help
         result = run([str(compiler), "-v", "--help"])
