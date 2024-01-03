@@ -23,9 +23,9 @@ class GCC(MultilingualCompiler):
 
     @staticmethod
     @cache
-    def get_version(compiler: Path):
+    def get_version(path: Path):
         # invoke gcc -v --version
-        result = run([str(compiler), "-v", "--version"])
+        result = run([str(path), "-v", "--version"])
         version: dict[str, str] = {}
         for match in re.finditer(GCC.version_pattern, result.stderr):
             version |= {k: v for k, v in match.groupdict().items() if v}
@@ -33,15 +33,12 @@ class GCC(MultilingualCompiler):
 
     @staticmethod
     def get_standards_raw(compiler):
-        search_pattern = re.compile(r"^\s+-std=(?P<standard>[^\s]+)[\s]*(Conform.*((C|C\+\+)( draft)? standard))"
-                                    r".*?((-std=(?P<alias>[^\s\.]+))|(\.$))")
+        search_pattern = re.compile(r"-std=(?P<standard>[^\s]+)[\s]*(Conform.*((C|C\+\+)( draft)? standard))"
+                                    r"((.|(\n    )\s+)*Same.as(.|(\n    )\s+)*-std=(?P<alias>[^\. ]+))?")
         standards = defaultdict(list)
         # invoke gcc -v --help
         result = run([str(compiler), "-v", "--help"])
-        for line in result.stdout.splitlines():
-            match = re.match(search_pattern, line)
-            if match is None:
-                continue
+        for match in search_pattern.finditer(result.stdout):
             standard = match['standard']
             if alias := match['alias']:
                 standards[alias].append(standard)
