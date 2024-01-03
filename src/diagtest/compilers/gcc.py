@@ -1,6 +1,4 @@
 import re
-import os
-import logging
 from pathlib import Path
 from functools import cache
 from collections import defaultdict
@@ -25,11 +23,9 @@ class GCC(MultilingualCompiler):
 
     @staticmethod
     @cache
-    def get_version(compiler: Path):
+    def get_version(path: Path):
         # invoke gcc -v --version
-        env = os.environ.copy()
-        env['COLUMNS'] = "1024"
-        result = run([str(compiler), "-v", "--version"], env=env)
+        result = run([str(path), "-v", "--version"])
         version: dict[str, str] = {}
         for match in re.finditer(GCC.version_pattern, result.stderr):
             version |= {k: v for k, v in match.groupdict().items() if v}
@@ -43,9 +39,6 @@ class GCC(MultilingualCompiler):
         # invoke gcc -v --help
         result = run([str(compiler), "-v", "--help"])
         for match in search_pattern.finditer(result.stdout):
-            if match is None:
-                continue
-
             standard = match['standard']
             if alias := match['alias']:
                 standards[alias].append(standard)
