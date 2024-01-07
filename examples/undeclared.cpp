@@ -13,7 +13,7 @@ int main() {
 
 @test("test only some versions"){
     undeclared;
-    @error(GCC(std='>11', version="<12.0"), regex=".* was not declared in this scope")
-    @error(MSVC(std='>14', target='x64'), "'undeclared': undeclared identifier")
+    @error(GCC(dialect='>11', version="<12.0"), regex=".* was not declared in this scope")
+    @error(MSVC(dialect='>14', target='x64'), "'undeclared': undeclared identifier")
 }
 }

@@ -1,129 +1,157 @@
-import subprocess
 import re
 import time
-import logging
-
-from pathlib import Path
 from abc import ABC, abstractmethod
-from collections import UserList, defaultdict
-from typing import Optional, Iterable, Type
-from dataclasses import dataclass, field
-from enum import Enum
 from functools import cache
+from operator import attrgetter
+from pathlib import Path
+from typing import Any, Optional, Type
 
-from packaging.version import Version
 from packaging.specifiers import SpecifierSet
+from packaging.version import Version
 
-from diagtest.util import find_executables
+from diagtest.report import Diagnostic, Level, Report, SourceLocation
+from diagtest.util import find_executables, remove_duplicates, run
 
-class Collection(UserList):
-    def __or__(self, other):
-        if isinstance(other, (list, Collection)):
-            self.extend(other)
-        else:
-            self.append(other)
-        return self
 
-    def compile(self, file: Path, args: Optional[list[str]] = None, env: Optional[dict[str, str]]=None):
-        for compiler in self.data:
-            yield from compiler.compile(file, args, env)
+def timed_run(name: str, compiler: Path, source_file: Path, args: list[str], env: Optional[dict[str, str]] = None) -> Report:
+    command = [str(compiler.resolve()), *args, str(source_file.resolve())]
+    start_time = time.monotonic_ns()
+    raw_result = run(command, env=env)
+    end_time = time.monotonic_ns()
 
-    def execute(self, file: Path, test_id: str):
-        for compiler in self.data:
-            yield from compiler.execute(file, test_id)
+    return Report(
+        name=name,
+        command=' '.join(command),
+        returncode=raw_result.returncode,
+        stdout=raw_result.stdout,
+        stderr=raw_result.stderr,
+        start_time=start_time,
+        end_time=end_time)
 
-    @property
-    def available(self):
-        return len(self.data) != 0
 
-    def __hash__(self):
-        return hash(iter(self))
+class CompilerInfo:
+    __slots__ = "executable", "languages", "version", "target"
+
+    def __init__(self, executable: Path, languages: list[str], version: str | Version, target: Optional[str] = None):
+        self.executable: Path = executable
+        self.languages: list[str] = languages
+        self.version = version if isinstance(version, Version) else Version(version)
+        self.target: Optional[str] = target
+
+    def dump(self) -> dict[str, Any]:
+        info = {'executable': self.executable,
+                'version': self.version}
+        if self.target:
+            info['target'] = self.target
+
+        info['languages'] = self.languages
+        return info
 
     def __str__(self):
-        if len(self.data) == 1:
-            return str(self.data[0])
-
-        compilers = ', '.join(str(data) for data in self.data)
-        return f"[{compilers}]"
-
-class Level(Enum):
-    note = "note"
-    warning = "warning"
-    error = "error"
-    fatal_error = "fatal error"
-    # ice = auto() # TODO
-
-
-@dataclass
-class SourceLocation:
-    path: Path
-    line: Optional[int] = None
-    column: Optional[int] = None
-
-
-@dataclass
-class Diagnostic:
-    message: str
-    source_location: Optional[SourceLocation] = None
-    error_code: Optional[str] = None  # MSVC specific
-
-
-@dataclass
-class Report:
-    command: str
-    returncode: int
-    stdout: str
-    stderr: str
-    start_time: int
-    end_time: int
-
-    diagnostics: defaultdict[Level, list[Diagnostic]] = field(default_factory=lambda: defaultdict(list))
-
-    def extend(self, diagnostics: Iterable[tuple[Level, Diagnostic]]):
-        for level, diagnostic in diagnostics:
-            self.diagnostics[level].append(diagnostic)
+        return str(self.dump())
 
     @property
-    def elapsed(self):
-        return self.end_time - self.start_time
+    def version_string(self):
+        ret = str(self.version)
+        if self.target:
+            ret += f" {self.target}"
+        return ret
+
+    def has_executable(self, executable: Path):
+        return self.executable == executable
+
+    def has_language(self, language: str):
+        return language in self.languages
+
+    def has_version(self, specifier: SpecifierSet):
+        return self.version in specifier
+
+    def has_target(self, query: str | re.Pattern):
+        if self.target is None:
+            return False
+
+        if isinstance(query, str):
+            return query == self.target
+        elif isinstance(query, re.Pattern):
+            return re.match(query, self.target)
+        raise RuntimeError("Query must be string or regex pattern")
+
+
+class CompilerCollection(list[CompilerInfo]):
+    def __getattr__(self, attr: str):
+        """ Filter by arbitrary attribute.
+        This assumes CompilerInfo has been subclassed and provides a method prefixed with has_
+        to determine if any compilers match the search query
+        """
+        if not attr.startswith('by_'):
+            # Ignore other unknown attributes
+            return None
+
+        def apply_filter(query: Any):
+            nonlocal attr
+            filtered_compilers: list[CompilerInfo] = []
+            for compiler in self:
+                check = getattr(compiler, attr.replace('by_', 'has_'), None)
+                if not check:
+                    continue
+
+                if check(query):
+                    filtered_compilers.append(compiler)
+
+            return CompilerCollection(filtered_compilers)
+
+        return apply_filter
 
     @property
-    def elapsed_ms(self):
-        return self.elapsed / 1e6
-
-    @property
-    def elapsed_s(self):
-        return self.elapsed / 1e9
-
-def run(command: list[str]|str, env: Optional[dict[str, str]] = None):
-    return subprocess.run(
-        command,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        universal_newlines=True,
-        check=False,
-        env=env
-    )
+    def executables(self):
+        return [compiler.executable for compiler in self]
 
 
 class Compiler(ABC):
     def __init__(
         self,
-        executable: Path,
-        options: Optional[list[str]] = None,
-        **_ # ignore excess keyword arguments
+        /, *,
+        language: str = "",
+        executable: Optional[Path] = None,
+        version: Optional[SpecifierSet | str] = None,
+        target: Optional[str | re.Pattern] = None,
+        args: Optional[list[str]] = None
     ):
-        self.options = options or []
-        self.compiler = executable
-        self.diagnostic_pattern = getattr(self, 'diagnostic_pattern')  # hack to make mypy happy
-        assert self.diagnostic_pattern is not None, "Compiler definition lacks a diagnostic pattern"
+        self.options = args or []
 
+        assert hasattr(type(self), "languages"), "Compiler definition lacks languages attribute"
+        if language not in getattr(self, "languages", []):
+            raise RuntimeError(f"Cannot run compiler {self!s} in language mode {language}")
+        self.language = language
+
+        assert hasattr(self, "diagnostic_pattern"), "Compiler definition lacks a diagnostic pattern"
+        self.diagnostic_pattern = getattr(self, 'diagnostic_pattern')  # hack to make mypy happy
         if isinstance(self.diagnostic_pattern, str):
             # compile the pattern if it hasn't yet happened
             self.diagnostic_pattern = re.compile(self.diagnostic_pattern)
 
-    def __call__(self, options: Optional[list[str]] = None, executable: Optional[Path] = None):
-        return type(self)(options=options or self.options, executable=executable or self.compiler)
+        if executable:
+            self.compilers = CompilerCollection([self.get_info(executable)])
+        else:
+            discovered_paths = self.discover()
+            compiler_paths = discovered_paths[self.language] if isinstance(discovered_paths, dict) else discovered_paths
+            self.compilers = CompilerCollection(self.get_info(path) for path in compiler_paths)
+
+        if version is not None:
+            version = SpecifierSet(version) if isinstance(version, str) else version
+            self.compilers = self.compilers.by_version(version)
+
+        if target is not None:
+            self.compilers = self.compilers.by_target(target)
+
+    def __call__(self, language: Optional[str] = None, args: Optional[list[str]] = None, **kwargs):
+        return type(self)(language=language or self.language, args=args or self.options, **kwargs)
+
+    @classmethod
+    def __init_subclass__(cls, **kwargs):
+        if cls not in compilers and hasattr(cls, 'languages'):
+            compilers.append(cls)
+        super().__init_subclass__(**kwargs)
 
     def extract_diagnostics(self, lines):
         for line in lines.splitlines():
@@ -144,26 +172,71 @@ class Compiler(ABC):
             level = Level(parts["level"])
             yield level, Diagnostic(parts["message"], source_location, parts.get("error_code", None))
 
-    def compile(self, file: Path | str, args: list[str], env: Optional[dict[str, str]]=None) -> Report:
-        command = [str(self.compiler), *args, str(file)]
+    def get_name(self, info: CompilerInfo):
+        name = type(self).__name__
+        target_str = f"{info.target} " if info.target else ""
+        return f"{target_str}{name} ({info.version})"
 
-        start_time = time.monotonic_ns()
-        raw_result = run(command, env=env)
-        end_time = time.monotonic_ns()
+    def run_test(self, source_file: Path, test: str):
+        for compiler in self.compilers:
+            # TODO env
+            result = timed_run(self.get_name(compiler), compiler.executable, source_file,
+                               [*self.get_compile_options(), self.select_test(test)])
+            result.extend(self.extract_diagnostics(result.stderr))
+            result.extend(self.extract_diagnostics(result.stdout))
+            yield result
 
-        result = Report(
-            command=' '.join(command),
-            returncode=raw_result.returncode,
-            stdout=raw_result.stdout,
-            stderr=raw_result.stderr,
-            start_time=start_time,
-            end_time=end_time)
-        result.extend(self.extract_diagnostics(result.stderr))
-        result.extend(self.extract_diagnostics(result.stdout))
-        return result
+    @classmethod
+    @cache
+    def discover(cls) -> list[Path] | dict[str | tuple[str, ...], list[Path]]:
+        assert hasattr(cls, 'executable_pattern'), "Auto discovery failed. Compiler definition lacks executable_pattern"
+        executable_pattern = getattr(cls, 'executable_pattern')
+        if isinstance(executable_pattern, dict):
+            # alternatives for various languages
+            return {language: remove_duplicates(find_executables(pattern))
+                    for language, pattern in executable_pattern.items()}
+        return remove_duplicates(find_executables(executable_pattern))
 
-    def execute(self, file: Path, test_id: str):
+    @staticmethod
+    @abstractmethod
+    def select_language(language: str):
+        raise NotImplementedError
+
+    @staticmethod
+    @abstractmethod
+    def select_test(test: str):
+        raise NotImplementedError
+
+    @staticmethod
+    @abstractmethod
+    def get_version(path: Path) -> Version | str:
         raise NotImplementedError()
+
+    @staticmethod
+    def get_target(path: Path) -> Optional[str]:
+        return None
+
+    @classmethod
+    def get_info(cls, path: Path) -> CompilerInfo:
+        assert hasattr(cls, "languages"), "Compiler definition lacks languages attribute"
+        return CompilerInfo(executable=path,
+                            languages=getattr(cls, "languages"),
+                            version=cls.get_version(path),
+                            target=cls.get_target(path))
+
+    def get_compile_options(self):
+        options = self.options or []
+        if language := self.select_language(self.language):
+            options.append(language)
+        return options
+
+    def get_alternative(self, path: Path) -> Path:
+        return path
+
+    def __str__(self):
+        name = type(self).__name__
+        versions = ", ".join(str(compiler.version) for compiler in sorted(self.compilers, key=attrgetter('version')))
+        return f"{name} ({versions})" if versions else name
 
     def __or__(self, other):
         if isinstance(other, (list, Collection)):
@@ -171,91 +244,35 @@ class Compiler(ABC):
             return other
         return Collection([self, other])
 
-    def __str__(self):
-        return type(self).__name__
+    @property
+    def available(self):
+        return len(self.compilers) != 0
+
+
+class Collection(list[Compiler]):
+    def __or__(self, other):
+        if isinstance(other, (list, Collection)):
+            self.extend(other)
+        else:
+            self.append(other)
+        return self
+
+    def run_test(self, file: Path, test_id: str):
+        for compiler in self:
+            yield compiler.run_test(file, test_id)
 
     @property
     def available(self):
-        return True
+        return len(self) != 0
 
-@dataclass
-class CompilerInfo:
-    executable: Path
-    version: Version
-    target: str
-
-class CompilerCollection(UserList[CompilerInfo]):
-    def by_version(self, specifier: SpecifierSet):
-        for compiler in self.data:
-            if compiler.version in specifier:
-                yield compiler
-
-    def by_target(self, target: str | re.Pattern):
-        def matches(compiler):
-            if isinstance(target, str):
-                return compiler.target == target
-            elif isinstance(target, re.Pattern):
-                return re.match(target, compiler.target)
-            raise RuntimeError("Target must be string or regex pattern")
-
-        for compiler in self.data:
-            if matches(compiler):
-                yield compiler
-
-    def by_executable(self, executable: Path):
-        for compiler in self.data:
-            if compiler.executable == executable:
-                yield compiler
-
-class VersionedCompiler(Compiler):
-    def __new__(cls: Type['VersionedCompiler'],
-                executable: Optional[Path] = None,
-                options: Optional[list[str]] = None,
-                version: Optional[SpecifierSet | str] = None,
-                target: Optional[str | re.Pattern] = None,
-                **kwargs):
-        def init(binary: Path):
-            nonlocal options
-            obj = object.__new__(cls)
-            cls.__init__(obj, executable=binary, options=options, **kwargs)
-            return obj
-
-        if executable is not None:
-            return init(executable)
-
-        compilers = CompilerCollection(cls.discover())
-        if version is not None:
-            version = SpecifierSet(version) if isinstance(version, str) else version
-            compilers = CompilerCollection(compilers.by_version(version))
-        if target is not None:
-            compilers = CompilerCollection(compilers.by_target(target))
-
-        return Collection([init(compiler.executable) for compiler in compilers])
-
-    @classmethod
-    @cache
-    def discover(cls):
-        assert hasattr(cls, 'executable_pattern')
-        assert hasattr(cls, 'get_version')
-        compilers: list[CompilerInfo] = []
-
-        def unique(iterable):
-            return [*{value: None for value in iterable}.keys()]
-
-        for executable in unique(find_executables(getattr(cls, 'executable_pattern'))):
-            version = getattr(cls, 'get_version')(executable)
-            if 'version' not in version or 'target' not in version:
-                logging.warning("Invalid compiler: %s", executable)
-                continue
-            compilers.append(CompilerInfo(executable, version['version'], version['target']))
-
-        return compilers
-
-    @staticmethod
-    @abstractmethod
-    def get_version(path: Path):
-        raise NotImplementedError()
+    def __hash__(self):
+        return hash(iter(self))
 
     def __str__(self):
-        version = self.get_version(self.compiler)
-        return f"{super().__str__()} ({version['version']}, {version['target']})"
+        if len(self) == 1:
+            return str(self[0])
+
+        return f"[{', '.join(str(data) for data in self)}]"
+
+
+compilers: list[Type[Compiler]] = []

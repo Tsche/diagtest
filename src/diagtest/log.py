@@ -2,7 +2,7 @@ import logging
 import sys
 
 import colorama
-
+from diagtest.exceptions import InterpreterError
 
 class LogFormatter(logging.Formatter):
     """Custom log formatter"""
@@ -63,20 +63,25 @@ def setup_logger() -> None:
 
     sys.excepthook = handle_exception
 
-def handle_exception(type_, value, trace):
+def handle_exception(type_, exception, trace):
     """Global exception handler.
     Prints uncaught exceptions with the custom formatter.
 
     Args:
         type_: Exception type
-        value: Exception value
+        exception: Exception value
         trace: Exception trace
     """
     logger = logging.getLogger(__package__)
 
-    if True or logger.isEnabledFor(logging.DEBUG):
-        logger.exception("Exception occurred: ", exc_info=(type_, value, trace))
+    if type_ is InterpreterError or issubclass(type_, InterpreterError):
+        logger.error("Traceback:")
+        logger.error('  File: "%s", line %d', exception.file, exception.line)
+        logger.error("%s: %s", type_.__name__, str(exception))
+
+    if logger.isEnabledFor(logging.DEBUG):
+        logger.exception("Exception occurred: ", exc_info=(type_, exception, trace))
     else:
-        logger.critical("Exception occurred: %s %s", type_.__name__, value)
+        logger.error("Exception occurred: %s %s", type_.__name__, exception)
 
     raise SystemExit(1)

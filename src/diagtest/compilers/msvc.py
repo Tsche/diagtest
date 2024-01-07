@@ -7,23 +7,39 @@ from functools import cache
 from pathlib import Path
 from enum import Enum
 
-from diagtest.compilers.multilingual import MultilingualCompiler
-from diagtest.compiler import run, CompilerInfo
+from diagtest.dialect import DialectCompiler, Dialect
+from diagtest.compiler import CompilerInfo
+from diagtest.util import run
+
 
 class VsArch(Enum):
     x86 = 'x86'
     x64 = 'amd64'
 
-class MSVC(MultilingualCompiler):
-    executable = "cl"
+
+class MSVC(DialectCompiler):
+    languages = 'c', 'c++'
     diagnostic_pattern = r"^((?P<path>[a-zA-Z0-9:\/\\\._-]*?)\((?P<line>[0-9]+)\): )"\
                          r"((?P<level>fatal error|error|warning) )((?P<error_code>[A-Z][0-9]+): )(?P<message>.*)$"
 
-    def execute(self, file: Path, test_id: str):
+    '''def execute(self, file: Path, test_id: str):
+        # TODO
         env = self.get_env(VsArch[self.get_version(self.compiler)['target']])
         for standard in self.selected_standards:
             name = f"{str(self)} ({standard})"
-            yield name, self.compile(file, [f"/std:{standard}", *(self.options or []), f"/D{test_id}"], env=env)
+            yield name, self.compile(file, [f"/std:{standard}", *(self.options or []), f"/D{test_id}"], env=env)'''
+
+    @staticmethod
+    def select_language(language: str):
+        return None
+
+    @staticmethod
+    def select_dialect(dialect: str):
+        return f"/std:{dialect}"
+
+    @staticmethod
+    def select_test(test: str):
+        return f"/D{test}"
 
     @staticmethod
     @cache
@@ -32,20 +48,33 @@ class MSVC(MultilingualCompiler):
 
     @staticmethod
     @cache
-    def get_version(compiler: Path):
+    def _query_version(compiler: Path) -> dict[str, str]:
         help_text = MSVC.get_help_text(compiler)
         version_pattern = re.compile(r"Version (?P<version>[0-9\.]+) for (?P<target>.*)")
-        return re.search(version_pattern, help_text.stderr).groupdict()
+        result = re.search(version_pattern, help_text.stderr)
+        assert result is not None, "Querying compiler version failed"
+        return result.groupdict()
+
+    @classmethod
+    def get_version(cls, path: Path) -> str:
+        info = cls._query_version(path)
+        assert 'version' in info, "Automatic version detection failed"
+        return info['version']
+
+    @classmethod
+    def get_target(cls, path: Path) -> str | None:
+        info = cls._query_version(path)
+        return info.get('target')
 
     @staticmethod
     @cache
-    def get_supported_standards(compiler: Path):
+    def get_supported_dialects(compiler: Path):
         help_text = MSVC.get_help_text(compiler)
         standard_pattern = r"\/std:<(?P<standards>.*)> (?P<language>[^ ]+)"
-        standards: dict[str, tuple[str, ...]] = {}
+        standards: dict[str, list[Dialect]] = {}
         for match in re.finditer(standard_pattern, help_text.stdout):
             language = match['language'].lower()
-            standards[language] = [(standard,) for standard in match["standards"].split('|')]
+            standards[language] = [Dialect(standard) for standard in match["standards"].split('|')]
         return standards
 
     @staticmethod
@@ -68,7 +97,8 @@ class MSVC(MultilingualCompiler):
     @staticmethod
     @cache
     def get_env(arch: VsArch):
-        if 'VSCMD_VER' in os.environ:
+        if os.environ.get('VSCMD_ARG_HOST_ARCH', None) == arch.name:
+            # environment already configured properly
             return None
 
         installation_info = MSVC.vswhere()
@@ -89,22 +119,22 @@ class MSVC(MultilingualCompiler):
         if 'VSCMD_VER' in os.environ:
             logging.debug("Developer VS Shell environment variables found. Skipping discovery.")
             compiler = shutil.which("cl")
-            if compiler is None:
-                return []
-
-            version = MSVC.get_version(compiler)
-            return [CompilerInfo(Path(compiler), version['version'], version['target'])]
+            return [] if compiler is None else [Path(compiler)]
 
         installation_info = MSVC.vswhere()
-        logging.debug("Discovered %s version %s", installation_info['displayName'], installation_info['installationVersion'])
+        if not installation_info:
+            # MSVC isn't installed
+            return []
 
-        compilers: list[CompilerInfo] = []
+        logging.debug("Discovered %s version %s",
+                      installation_info['displayName'],
+                      installation_info['installationVersion'])
+
+        compilers: list[Path] = []
         for arch in VsArch:
             env = MSVC.get_env(arch)
             compiler = shutil.which("cl", path=env['Path'])
             if compiler is None:
                 continue
-
-            version = MSVC.get_version(compiler)
-            compilers.append(CompilerInfo(Path(compiler), version['version'], version['target']))
+            compilers.append(Path(compiler))
         return compilers

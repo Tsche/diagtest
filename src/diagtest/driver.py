@@ -9,31 +9,20 @@ import em
 from click import style
 
 from diagtest.assertion import Assertion, Message, ReturnCode, ErrorCode
-from diagtest.compiler import Compiler, Level, Report
+from diagtest.compiler import Compiler, Level
 from diagtest.exceptions import UsageError
-from diagtest.default import get_defaults
+from diagtest.util import change_repr
+from diagtest.default import compilers, languages
+from diagtest.language import Language, detect_language
 
-def change_repr(repr_fnc):
-    class ReprWrapper:
-        def __init__(self, fnc):
-            self.fnc = fnc
-
-        def __call__(self, *args, **kwargs):
-            return self.fnc(*args, **kwargs)
-
-        def __repr__(self):
-            nonlocal repr_fnc
-            return repr_fnc()
-
-    return ReprWrapper
 
 class Runner:
-    def __init__(self, source: Path, out_path: Optional[Path] = None):
+    def __init__(self, source: Path, out_path: Optional[Path] = None, language: str = ""):
         if out_path is None:
             out_path = source.parent / "build"
 
         out_path.mkdir(exist_ok=True, parents=True)
-        with Parser(source) as (processed, tests):
+        with Parser(source, language) as (processed, tests):
             self.tests = tests
 
             preprocessed_source = out_path / source.name
@@ -46,62 +35,67 @@ class Runner:
 
 @dataclass
 class Test:
+    identifier: str
     name: str
     assertions: defaultdict[Compiler, list[Assertion]] = field(default_factory=lambda: defaultdict(list))
 
     @property
-    def identifier(self):
-        return self.name.upper().replace(" ", "_")
+    def compilers(self):
+        return self.assertions.keys()
 
     def add_assertion(self, compiler: Compiler, assertion: Assertion):
         self.assertions[compiler].append(assertion)
 
     def run(self, source: Path):
         print(f"Test '{self.name}'")
+        results = {compiler: list(compiler.run_test(source, self.identifier)) for compiler in self.compilers}
         failed = False
+
         for compiler, assertions in self.assertions.items():
             if not compiler.available:
-                #logging.warning("Skipping %s because it is not available.", compiler)
+                print(f"  Compiler {compiler} - skipped")
                 continue
 
-            print(f"  Compiler group {compiler}")
-            results: dict[Assertion, list[tuple[str, bool, Report]]] = defaultdict(list)
-            for name, result in compiler.execute(source, self.identifier):
-                for assertion in assertions:
-                    success = assertion.check(result)
-                    results[assertion].append((name, success, result))
-
-            for assertion, runs in results.items():
+            print(f"  Compiler {compiler}")
+            for assertion in assertions:
                 print(f"    {assertion}")
-                for name, success, result in runs:
+                for result in results[compiler]:
+                    success = assertion.check(result)
                     message = style("PASS", fg="green") if success else style("FAIL", fg="red")
-                    print(f"      {name}: {message}")
+                    print(f"      {result.name}: {message}")
                     if not success:
                         failed = True
-                        logging.error(f"Command: {result.command}")
-                        print("STDOUT\n",result.stdout)
+                        logging.error("Command failed: %s", result.command)
+                        print("STDOUT\n", result.stdout)
                         print("STDERR\n", result.stderr)
-                        print(result.diagnostics)
+
         return not failed
 
 
 class Parser:
-    def __init__(self, source: Path):
-        self.globals = {
-            "include": self.include,
-            "update_globals": self.update_globals,
-            "load_defaults": self.load_defaults,
-            "test": self.test,
-            "error_code": self.error_code,
-            "return_code": self.return_code,
-            "note": self.note,
-            "warning": self.warning,
-            "error": self.error,
-            "fatal_error": self.fatal_error
-        }
+    def __init__(self, source: Path, language: str = ""):
+        self.globals = {name: getattr(self, name)
+                        for name in dir(type(self))
+                        if not name.startswith('_')}
+
         self.interpreter = em.Interpreter(globals=self.globals)
+
         self.tests: list[Test] = []
-        self.source = source
+        self.source: Path = source
+        self.language: str = language
+        self.language_definition: Optional[type[Language]] = None
+
+        if not self.language:
+            candidates = detect_language(source)
+            if len(candidates) > 1:
+                logging.debug("Language for %s is ambiguous. Candidates: %s", source, candidates)
+            elif len(candidates) == 1:
+                self.language = candidates[0]
+            else:
+                logging.debug("Could not detect language for %s", source)
+
+        self.set_language(language)
+
 
     def __enter__(self):
         content = self.source.read_text(encoding="utf-8")
@@ -121,11 +115,38 @@ class Parser:
 
         self.interpreter.include(str(path.resolve()))
 
-    def load_defaults(self, language: str):
-        language = language.lower()
-        defaults = get_defaults(language)
+    def set_language(self, language: str = ""):
+        if not language:
+            return
+
+        self.language = language
+        definition = languages.get(language)
+        if self.language_definition != definition:
+            self.language_definition = definition
+            # TODO reload interpreter
+
+    def load_defaults(self, language: str = ""):
+        if language:
+            self.set_language(language)
+        assert self.language, "Must specify language to load defaults for"
+        defaults: dict[str, Any] = {}
+
+        def wrap(cls):
+            def inner(**kwargs):
+                if 'language' not in kwargs:
+                    kwargs['language'] = self.language
+                return cls(**kwargs)
+            return inner
+
+        for compiler in compilers:
+            if self.language not in getattr(compiler, 'languages', []):
+                continue
+
+            defaults[compiler.__name__] = wrap(compiler)
+            defaults[compiler.__name__.lower()] = compiler(language=self.language)
+
         if not defaults:
-            logging.warning("Could not find defaults for language %s", language)
+            logging.warning("Could not find defaults for language %s", self.language)
             return
         self.update_globals(defaults)
 
@@ -133,8 +154,10 @@ class Parser:
         self.interpreter.updateGlobals(new_globals)
 
     def test(self, name: str):
-        this_test = Test(name)
-        self.tests.append(this_test)
+        assert self.language, "Automatic language detection failed. "\
+            "Specify it as command line argument or use set_language before the first test"
+        assert self.language_definition is not None, "Missing language definition"
+        self.tests.append(Test(self.language_definition.identifier(name), name))
 
         def report_usage_error():
             raise UsageError(self.interpreter.identify(),
@@ -142,9 +165,9 @@ class Parser:
 
         @change_repr(report_usage_error)
         def wrap(code: str):
-            nonlocal this_test
-            # TODO this is language dependent
-            return f"\n#ifdef {this_test.identifier}\n{code}\n#endif"
+            nonlocal name
+            assert self.language_definition is not None, "Missing language definition"
+            return self.language_definition.wrap_test(name, code)
 
         return wrap
 

@@ -1,44 +1,47 @@
-# TODO walk compilers directory instead
+import logging
+from pathlib import Path
+from itertools import groupby
+from functools import partial
 
-def get_defaults(language: str):
-    if language in {'c', 'c++', 'gnu', 'gnu++'}:
-        # TODO auto register
-        from diagtest.compilers.gcc import GCC
-        from diagtest.compilers.clang import Clang
-        from diagtest.compilers.msvc import MSVC
-
-        def wrap(cls):
-            def inner(**kwargs):
-                if 'language' not in kwargs:
-                    kwargs['language'] = language
-                return cls(**kwargs)
-            return inner
-
-        compilers = [GCC, Clang, MSVC]
-        return {**{compiler.__name__: wrap(compiler)
-                   for compiler in compilers},
-                **{compiler.__name__.lower(): compiler(language=language)
-                   for compiler in compilers}}
-    return {}
+from diagtest.compiler import compilers
+from diagtest.language import languages
+from diagtest.util import remove_duplicates, print_dict
+__all__ = ['compilers', 'languages', 'load_compilers', 'load_languages']
 
 def dump_compilers():
-    from diagtest.compilers.gcc import GCC
-    from diagtest.compilers.clang import Clang
-    from diagtest.compilers.msvc import MSVC
+    def key_function(compiler, path: Path):
+        return compiler.get_version(path), compiler.get_target(path)
 
-    compilers = [GCC, Clang, MSVC]
     for compiler in compilers:
+        print(f"Compiler `{compiler.__name__}`")
         discovered = compiler.discover()
         if not discovered:
+            # print("    not found")
+            continue
+        if isinstance(discovered, dict):
+            discovered = remove_duplicates([compiler
+                                            for compiler_list in discovered.values()
+                                            for compiler in compiler_list])
+
+            for _, group in groupby(discovered, partial(key_function, compiler)):
+                executables = list(group)
+                assert executables, "Empty group in compilers listed by version. How?"
+                info = compiler.get_info(executables[0]).dump()
+                info['executable'] = executables
+                print_dict(info, indent=4, indent_level=1)
             continue
 
-        for compiler_info in discovered:
-            version = compiler.get_version(compiler_info.executable)
-            print(f"{compiler.__name__} ({version['version']})")
-            print(f"  Executable: {compiler_info.executable}")
-            print(f"  Target:     {version['target']}")
-            print( "  Languages:")
-            standards = compiler.get_supported_standards(compiler_info.executable)
-            for language, standard in standards.items():
-                print(f"    {language:<6} {', '.join(', '.join(std) for std in standard)}")
-            print()
+        for compiler_path in discovered:
+            info = compiler.get_info(compiler_path).dump()
+            print_dict(info, indent=4, indent_level=1)
+
+
+def load_compilers():
+    # TODO load all files in compilers directory instead
+    import diagtest.compilers.gcc
+    import diagtest.compilers.msvc
+    import diagtest.compilers.clang
+
+
+def load_languages():
+    import diagtest.languages.cfamily
