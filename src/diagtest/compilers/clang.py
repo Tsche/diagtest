@@ -10,16 +10,6 @@ class Clang(GCC):
     languages = 'c', 'c++', 'gnu', 'gnu++'
     executable_pattern = r"^clang(-[0-9]+)?(\.exe|\.EXE)?$"
 
-    @staticmethod
-    @cache
-    def _query_version(compiler: Path):
-        # invoke clang --version
-        result = run([str(compiler), "--version"])
-        version: dict[str, str] = {}
-        for match in re.finditer(GCC.version_pattern, result.stdout):
-            version |= {k: v for k, v in match.groupdict().items() if v}
-        return version
-
     standard_pattern = re.compile(r"use '(?P<standard>[^']+)'")
     standard_alias_pattern = re.compile(r"(( or|,) '(?P<alias>[^']+))")
 
