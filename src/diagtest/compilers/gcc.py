@@ -10,8 +10,8 @@ from diagtest.util import run
 
 class GCC(DialectCompiler):
     languages = 'c', 'c++', 'gnu', 'gnu++'
-    diagnostic_pattern = r"^((?P<path>[^:]*?):((?P<line>[0-9]+):)?((?P<column>[0-9]+):)? )"\
-                         r"?((?P<level>error|warning|note): )(?P<message>.*)$"
+    diagnostic_pattern = r"^((?P<path>.*?):((?P<line>[0-9]+):)?((?P<column>[0-9]+):)? )?"\
+                         r"((?P<level>error|warning|note): )(?P<message>.*)$"
 
     version_pattern = re.compile(r"((Target: (?P<target>.*))|(Thread model: (?P<thread_model>.*))|"
                                  r"((gcc|clang) version (?P<version>[0-9\.]+)))")
