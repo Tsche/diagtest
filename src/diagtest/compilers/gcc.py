@@ -100,6 +100,9 @@ class GCC(DialectCompiler):
     @classmethod
     def get_version(cls, path: Path) -> str:
         info = cls._query_version(path)
+        if 'version' not in info:
+            import logging
+            logging.error(info)
         assert 'version' in info, "Automatic version detection failed"
         return info['version']
 
