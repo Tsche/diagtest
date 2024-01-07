@@ -44,12 +44,10 @@ class GCC(DialectCompiler):
     def _query_version(path: Path) -> dict[str, str]:
         # invoke gcc -v --version
         result = run([str(path), "-v", "--version"])
-        import logging
-        logging.error(result.stderr)
-        logging.warning(result.stdout)
         version: dict[str, str] = {}
-        for match in re.finditer(GCC.version_pattern, result.stderr):
-            version |= {k: v for k, v in match.groupdict().items() if v}
+        for source in result.stderr, result.stdout:
+            for match in re.finditer(GCC.version_pattern, source):
+                version |= {k: v for k, v in match.groupdict().items() if v}
         return version
 
     @staticmethod
