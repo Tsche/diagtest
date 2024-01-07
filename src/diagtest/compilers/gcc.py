@@ -44,6 +44,9 @@ class GCC(DialectCompiler):
     def _query_version(path: Path) -> dict[str, str]:
         # invoke gcc -v --version
         result = run([str(path), "-v", "--version"])
+        import logging
+        logging.error(result.stderr)
+        logging.warning(result.stdout)
         version: dict[str, str] = {}
         for match in re.finditer(GCC.version_pattern, result.stderr):
             version |= {k: v for k, v in match.groupdict().items() if v}
@@ -100,9 +103,6 @@ class GCC(DialectCompiler):
     @classmethod
     def get_version(cls, path: Path) -> str:
         info = cls._query_version(path)
-        if 'version' not in info:
-            import logging
-            logging.error(info)
         assert 'version' in info, "Automatic version detection failed"
         return info['version']
 
