@@ -34,4 +34,5 @@ jobs:
       uses: test-summary/action@v2
       with:
         paths: "results/report-*.xml"
+        show: "all"
       if: always()
