@@ -28,12 +28,12 @@ def dump_compilers():
                 assert executables, "Empty group in compilers listed by version. How?"
                 info = compiler.get_info(executables[0]).dump()
                 info['executable'] = executables
-                print_dict(info, indent=4, indent_level=1)
+                print_dict(info, indent_amount=4, indent_level=1)
             continue
 
         for compiler_path in discovered:
             info = compiler.get_info(compiler_path).dump()
-            print_dict(info, indent=4, indent_level=1)
+            print_dict(info, indent_amount=4, indent_level=1)
 
 
 def load_compilers():

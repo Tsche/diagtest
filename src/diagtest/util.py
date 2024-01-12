@@ -1,11 +1,59 @@
+import logging
 import os
 import re
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, TypeVar, Iterable, Any
+import time
+from typing import Any, Iterable, Optional, TypeVar
 
 
-def find_executables(query: re.Pattern | str):
+@dataclass
+class Result:
+    command: str
+    returncode: int
+    stdout: str
+    stderr: str
+    start_time: int
+    end_time: int
+
+    @property
+    def elapsed(self):
+        assert self.end_time >= self.start_time, "Invalid time measurements"
+        return self.end_time - self.start_time
+
+    @property
+    def elapsed_ms(self):
+        return self.elapsed / 1e6
+
+    @property
+    def elapsed_s(self):
+        return self.elapsed / 1e9
+
+
+def run(command: list[str] | str, env: Optional[dict[str, str]] = None):
+    command_str = command if isinstance(command, str) else ' '.join(command)
+    logging.debug(command_str)
+    start_time = time.monotonic_ns()
+    result = subprocess.run(
+        command,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        universal_newlines=True,
+        check=False,
+        env=env
+    )
+    end_time = time.monotonic_ns()
+
+    return Result(command_str,
+                  result.returncode,
+                  result.stdout,
+                  result.stderr,
+                  start_time,
+                  end_time)
+
+
+def which(query: re.Pattern | str):
     query = re.compile(query) if isinstance(query, str) else query
     env_path = os.environ.get('PATH', os.environ.get('Path', os.defpath))
     paths = [Path(path) for path in env_path.split(os.pathsep)]
@@ -17,17 +65,6 @@ def find_executables(query: re.Pattern | str):
             if query.match(file.name):
                 # resolving here should get rid of symlink aliases
                 yield file.resolve()
-
-
-def run(command: list[str] | str, env: Optional[dict[str, str]] = None):
-    return subprocess.run(
-        command,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        universal_newlines=True,
-        check=False,
-        env=env
-    )
 
 
 def change_repr(repr_fnc):
@@ -61,20 +98,48 @@ Element = TypeVar('Element')
 def remove_duplicates(data: Iterable[Element]) -> list[Element]:
     return [*{entry: None for entry in data}.keys()]
 
-def print_dict(info: dict[str, Any], indent: int = 0, indent_level: int = 0):
-    key_max_width = max(len(key) for key in info)
-    indentation = ' ' * (indent * indent_level)
-    def align_key(text: str, suffix: str = ""):
-        nonlocal key_max_width
-        diff = key_max_width - len(text)
-        return f"{text}{suffix}{' '*diff}"
+def format_dict(item: dict,
+                indent_amount: int = 4,
+                indent_level: int = 0,
+                dict_separator: str = ": ",
+                list_separator: str = ", ",
+                break_list: bool = False,
+                right_align: bool = False) -> Iterable[str]:
+    max_width = max(len(str(key)) for key in item)
 
-    for key, value in info.items():
-        line = f"{indentation}{align_key(key, ': ')}"
+    def align(inner_key: Any, prefix: str = "", suffix: str = ""):
+        nonlocal max_width, right_align
+        diff = ' ' * (max_width - len(str(inner_key)))
+        wrapped = f"{prefix}{inner_key}{suffix}"
+        return diff + wrapped if right_align else wrapped + diff
+
+    for key, value in item.items():
+        line = f"{align(key, suffix=dict_separator)}"
         if isinstance(value, dict):
-            print(line)
-            print_dict(value, indent, indent_level + 1)
+            yield from indent(line, indent_level, indent_amount)
+            yield from format_dict(value, indent_amount, indent_level + 1, dict_separator, list_separator, break_list, right_align)
+
         elif isinstance(value, (list, tuple, set)):
-            print(line + ', '.join(str(element) for element in value))
+            if break_list:
+                yield from indent(line, indent_level, indent_amount)
+                for element in value:
+                    yield from indent(str(element), indent_level + 1, indent_amount)
+            else:
+                yield from indent(line + list_separator.join(str(element) for element in value), indent_level, indent_amount)
+
         else:
-            print(line + str(value))
+            yield from indent(line + str(value), indent_level, indent_amount)
+
+
+def print_dict(item: dict, *args, **kwargs):
+    for line in format_dict(item, *args, **kwargs):
+        print(line)
+
+def indent(element: Any, indent_level: int = 1, indent_amount: int = 4):
+    indentation = ' ' * (indent_amount * indent_level)
+    for line in str(element).splitlines():
+        yield f"{indentation}{line}"
+
+def print_indent(what: Any, indent_level: int = 0, indent_amount: int = 4, **kwargs):
+    for line in indent(what, indent_level, indent_amount):
+        print(line, **kwargs)

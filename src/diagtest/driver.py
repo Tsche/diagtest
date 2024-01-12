@@ -1,75 +1,50 @@
 import logging
 import re
-from collections import defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Any
 
 import em
-from click import style
 
-from diagtest.assertion import Assertion, Message, ReturnCode, ErrorCode
-from diagtest.compiler import Compiler, Level
+from diagtest.assertion import Message, ReturnCode, ErrorCode
+from diagtest.test import Test, TestSuiteResult
+from diagtest.compiler import Compiler
+from diagtest.report import Level
 from diagtest.exceptions import UsageError
 from diagtest.util import change_repr
 from diagtest.default import compilers, languages
 from diagtest.language import Language, detect_language
 
-
-class Runner:
-    def __init__(self, source: Path, out_path: Optional[Path] = None, language: str = ""):
-        if out_path is None:
-            out_path = source.parent / "build"
-
-        out_path.mkdir(exist_ok=True, parents=True)
-        with Parser(source, language) as (processed, tests):
-            self.tests = tests
-
-            preprocessed_source = out_path / source.name
-            preprocessed_source.write_text(processed)
-            self.source = preprocessed_source
+@dataclass
+class TestSuite:
+    tests: list[Test]
+    source: Path
 
     def run(self):
-        return all(test.run(self.source) for test in self.tests)
+        return TestSuiteResult([test.run(self.source) for test in self.tests], source_file=self.source)
 
+class Runner:
+    def __init__(self, sources: Path | list[Path], out_path: Optional[Path] = None, language: str = ""):
+        self.out_path = out_path
+        self.language = language
+        self.sources = sources if isinstance(sources, list) else [sources]
 
-@dataclass
-class Test:
-    identifier: str
-    name: str
-    assertions: defaultdict[Compiler, list[Assertion]] = field(default_factory=lambda: defaultdict(list))
+    def expand(self, source: Path):
+        out_path = self.out_path or source.parent / "build"
 
-    @property
-    def compilers(self):
-        return self.assertions.keys()
+        out_path.mkdir(exist_ok=True, parents=True)
+        with Parser(source, self.language) as (processed, tests):
+            preprocessed_source = out_path / source.name
+            preprocessed_source.write_text(processed)
+            return TestSuite(tests, preprocessed_source)
 
-    def add_assertion(self, compiler: Compiler, assertion: Assertion):
-        self.assertions[compiler].append(assertion)
-
-    def run(self, source: Path):
-        print(f"Test '{self.name}'")
-        results = {compiler: list(compiler.run_test(source, self.identifier)) for compiler in self.compilers}
-        failed = False
-
-        for compiler, assertions in self.assertions.items():
-            if not compiler.available:
-                print(f"  Compiler {compiler} - skipped")
-                continue
-
-            print(f"  Compiler {compiler}")
-            for assertion in assertions:
-                print(f"    {assertion}")
-                for result in results[compiler]:
-                    success = assertion.check(result)
-                    message = style("PASS", fg="green") if success else style("FAIL", fg="red")
-                    print(f"      {result.name}: {message}")
-                    if not success:
-                        failed = True
-                        logging.error("Command failed: %s", result.command)
-                        print("STDOUT\n", result.stdout)
-                        print("STDERR\n", result.stderr)
-
-        return not failed
+    def run(self):
+        for source in self.sources:
+            try:
+                suite = self.expand(source)
+                yield suite.run()
+            except Exception as exc: # TODO refine
+                logging.error("Running %s failed. Reason: %s", source, str(exc))
 
 
 class Parser:

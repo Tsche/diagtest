@@ -1,32 +1,17 @@
+from collections import defaultdict
 import re
-import time
+
 from abc import ABC, abstractmethod
 from functools import cache
 from operator import attrgetter
 from pathlib import Path
-from typing import Any, Optional, Type
+from typing import Any, Iterable, Optional, Type
 
 from packaging.specifiers import SpecifierSet
 from packaging.version import Version
 
-from diagtest.report import Diagnostic, Level, Report, SourceLocation
-from diagtest.util import find_executables, remove_duplicates, run
-
-
-def timed_run(name: str, compiler: Path, source_file: Path, args: list[str], env: Optional[dict[str, str]] = None) -> Report:
-    command = [str(compiler.resolve()), *args, str(source_file.resolve())]
-    start_time = time.monotonic_ns()
-    raw_result = run(command, env=env)
-    end_time = time.monotonic_ns()
-
-    return Report(
-        name=name,
-        command=' '.join(command),
-        returncode=raw_result.returncode,
-        stdout=raw_result.stdout,
-        stderr=raw_result.stderr,
-        start_time=start_time,
-        end_time=end_time)
+from diagtest.report import Diagnostic, Level, SourceLocation
+from diagtest.util import Result, which, remove_duplicates, run
 
 
 class CompilerInfo:
@@ -107,6 +92,19 @@ class CompilerCollection(list[CompilerInfo]):
         return [compiler.executable for compiler in self]
 
 
+class ProcessedResult(Result):
+    def __init__(self, result: Result, name: str, compiler: CompilerInfo):
+        super().__init__(result.command, result.returncode, result.stdout, result.stderr, result.start_time, result.end_time)
+        self.name = name
+        self.compiler = compiler
+        # TODO Level should be an open set. Replace with str
+        self.diagnostics: dict[Level, list[Diagnostic]] = defaultdict(list)
+
+    def extend(self, diagnostics: Iterable[tuple[Level, Diagnostic]]):
+        for level, diagnostic in diagnostics:
+            self.diagnostics[level].append(diagnostic)
+
+
 class Compiler(ABC):
     def __init__(
         self,
@@ -177,14 +175,23 @@ class Compiler(ABC):
         target_str = f"{info.target} " if info.target else ""
         return f"{target_str}{name} ({info.version})"
 
+    def execute(self, name: str, compiler: CompilerInfo, source_file: Path,
+                extra_args: Optional[list[str]] = None, env: Optional[dict[str, str]] = None) -> ProcessedResult:
+
+        result = run([str(compiler.executable.resolve()),
+                      # TODO select language if needed
+                      *self.get_compile_options(),
+                      *(extra_args or []),
+                      str(source_file.resolve())], env=env)
+
+        processed = ProcessedResult(result, name, compiler)
+        processed.extend(self.extract_diagnostics(result.stderr))
+        processed.extend(self.extract_diagnostics(result.stdout))
+        return processed
+
     def run_test(self, source_file: Path, test: str):
         for compiler in self.compilers:
-            # TODO env
-            result = timed_run(self.get_name(compiler), compiler.executable, source_file,
-                               [*self.get_compile_options(), self.select_test(test)])
-            result.extend(self.extract_diagnostics(result.stderr))
-            result.extend(self.extract_diagnostics(result.stdout))
-            yield result
+            yield self.execute(self.get_name(compiler), compiler, source_file, [self.select_test(test)])
 
     @classmethod
     @cache
@@ -193,9 +200,9 @@ class Compiler(ABC):
         executable_pattern = getattr(cls, 'executable_pattern')
         if isinstance(executable_pattern, dict):
             # alternatives for various languages
-            return {language: remove_duplicates(find_executables(pattern))
+            return {language: remove_duplicates(which(pattern))
                     for language, pattern in executable_pattern.items()}
-        return remove_duplicates(find_executables(executable_pattern))
+        return remove_duplicates(which(executable_pattern))
 
     @staticmethod
     @abstractmethod

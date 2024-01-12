@@ -28,4 +28,10 @@ jobs:
       run: diagtest --list-compilers
 
     - name: Run example
-      run: diagtest examples/undeclared.cpp --verbose
+      run: diagtest examples/undeclared.cpp --brief --junit-xml results/report-${{ matrix.os }}-${{ matrix.python-version }}.xml
+    
+    - name: Test Summary
+      uses: test-summary/action@v2
+      with:
+        paths: "results/report-*.xml"
+      if: always()

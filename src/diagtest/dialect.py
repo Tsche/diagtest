@@ -3,7 +3,7 @@ from typing import Optional, Any
 from pathlib import Path
 from abc import abstractmethod
 
-from diagtest.compiler import Compiler, CompilerInfo, timed_run
+from diagtest.compiler import Compiler, CompilerInfo
 from diagtest.util import remove_duplicates
 
 
@@ -128,15 +128,9 @@ class DialectCompiler(Compiler):
 
     def run_test(self, source_file: Path, test: str):
         for compiler, dialects in self.dialects.items():
-            # TODO env
             for dialect in dialects:
                 name = f"{self.get_name(compiler)} ({dialect})"
-                result = timed_run(name, compiler.executable, source_file,
-                                   [*self.get_compile_options(), self.select_dialect(dialect),
-                                    self.select_test(test)])
-                result.extend(self.extract_diagnostics(result.stderr))
-                result.extend(self.extract_diagnostics(result.stdout))
-                yield result
+                yield self.execute(name, compiler, source_file, [self.select_dialect(dialect), self.select_test(test)])
 
     @staticmethod
     @abstractmethod
