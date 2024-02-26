@@ -26,7 +26,7 @@ setup_logger()
 @click.argument("files", type=Path, nargs=-1)
 def main(files: list[Path], sort_by_assertion: bool, list_compilers: bool = False, verbose: bool = False, brief: bool = False,
          output: Optional[Path] = None, language: str = "", junit_xml: Optional[Path] = None, json: Optional[Path] = None):
-    assert all(file.exists() for file in files), "Please provide a valid file paths"
+    assert all(file.exists() for file in files), "Please provide valid file paths"
     if verbose:
         logging.root.setLevel(logging.DEBUG)
 

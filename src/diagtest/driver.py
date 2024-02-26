@@ -32,7 +32,7 @@ class Runner:
 
     def expand(self, source: Path):
         out_path = self.out_path or source.parent / "build"
-
+        out_path = Path(out_path)
         out_path.mkdir(exist_ok=True, parents=True)
         with Parser(source, self.language) as (processed, tests):
             preprocessed_source = out_path / source.name
@@ -45,7 +45,7 @@ class Runner:
                 suite = self.expand(source)
                 yield suite.run()
             except Exception as exc: # TODO refine
-                logging.error("Running %s failed. Reason: %s", source, str(exc))
+                logging.exception("Running %s failed. Reason: %s", source, str(exc))
 
 
 class Parser:
