@@ -21,7 +21,7 @@ setup_logger()
 @click.option("--language", "-l", type=str, default="", help="Target language")
 @click.option("--sort-by-assertion", type=bool, default=False, is_flag=True, help="Sort results by assertion, not by compiler")
 @click.option("--junit-xml", type=Path, default=None, help="Path to output JUnit style XML test report to")
-@click.option("--json", type=Path, default=None, help="Path to output JSON test report to")
+#@click.option("--json", type=Path, default=None, help="Path to output JSON test report to")
 @click.option("--brief", type=bool, default=False, is_flag=True, help="Do not output extra info for failed assertions")
 @click.argument("files", type=Path, nargs=-1)
 def main(files: list[Path], sort_by_assertion: bool, list_compilers: bool = False, verbose: bool = False, brief: bool = False,
@@ -46,9 +46,9 @@ def main(files: list[Path], sort_by_assertion: bool, list_compilers: bool = Fals
         from diagtest.output.junit import JUnitPrinter
         printers.append(JUnitPrinter(junit_xml, assertion_first=sort_by_assertion))
 
-    if json:
-        from diagtest.output.json import JSONPrinter
-        printers.append(JSONPrinter(json))
+    #if json:
+    #    from diagtest.output.json import JSONPrinter
+    #    printers.append(JSONPrinter(json))
 
     with nullcontext(output) if output is not None else TemporaryDirectory() as out_path:
         runner = Runner(list(files), Path(out_path), language)

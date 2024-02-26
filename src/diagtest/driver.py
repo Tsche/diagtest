@@ -57,6 +57,7 @@ class Parser:
         self.interpreter = em.Interpreter(globals=self.globals)
 
         self.tests: list[Test] = []
+        self.include_paths: list[Path] = []
         self.source: Path = source
         self.language: str = language
         self.language_definition: Optional[type[Language]] = None
@@ -81,15 +82,28 @@ class Parser:
     def __exit__(self, type_, value, traceback):
         self.interpreter.shutdown()
 
-    def include(self, path: Path | str):
+    def _resolve_path(self, path: Path | str):
         if not isinstance(path, Path):
             path = Path(path)
 
         if not path.is_absolute():
             file, *_ = self.interpreter.identify()
             path = Path(file).parent / path
+        return path.resolve()
 
-        self.interpreter.include(str(path.resolve()))
+    def include(self, path: Path | str):
+        self.interpreter.include(str(self._resolve_path(path)))
+
+    def include_path(self, path: Path | str):
+        """
+            Adds a directory to the include path. This may only be called before load_defaults!
+        Args:
+            path: Directory to add to the include path
+        """
+        path = self._resolve_path(path)
+        assert path.exists(), "Include path does not exist"
+        assert path.is_dir(), "Path does not point to a directory"
+        self.include_paths.append(path)
 
     def set_language(self, language: str = ""):
         if not language:
@@ -101,7 +115,7 @@ class Parser:
             self.language_definition = definition
             # TODO reload interpreter
 
-    def load_defaults(self, language: str = ""):
+    def load_defaults(self, language: str = "", dialect: str = ""):
         if language:
             self.set_language(language)
         assert self.language, "Must specify language to load defaults for"
@@ -111,6 +125,19 @@ class Parser:
             def inner(**kwargs):
                 if 'language' not in kwargs:
                     kwargs['language'] = self.language
+
+                if self.include_paths:
+                    if 'args' not in kwargs:
+                        kwargs['args'] = []
+
+                    assert hasattr(cls, "include"), f"Compiler {cls} cannot expand includes."
+                    for path in self.include_paths:
+                        kwargs['args'].append(cls.include(path))
+
+                nonlocal dialect
+                if dialect and 'dialect' not in kwargs:
+                    kwargs['dialect'] = dialect
+
                 return cls(**kwargs)
             return inner
 
@@ -119,7 +146,7 @@ class Parser:
                 continue
 
             defaults[compiler.__name__] = wrap(compiler)
-            defaults[compiler.__name__.lower()] = compiler(language=self.language)
+            defaults[compiler.__name__.lower()] = defaults[compiler.__name__]()
 
         if not defaults:
             logging.warning("Could not find defaults for language %s", self.language)

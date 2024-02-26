@@ -42,6 +42,10 @@ class MSVC(DialectCompiler):
         return f"/D{test}"
 
     @staticmethod
+    def include(directory: Path):
+        return f"/I{directory.absolute()!s}"
+
+    @staticmethod
     @cache
     def get_help_text(compiler: Path):
         return run([str(compiler), '/help'])

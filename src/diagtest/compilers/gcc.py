@@ -40,6 +40,10 @@ class GCC(DialectCompiler):
         return f"-D{test}"
 
     @staticmethod
+    def include(directory: Path):
+        return f"-I{directory.absolute()!s}"
+
+    @staticmethod
     @cache
     def _query_version(path: Path) -> dict[str, str]:
         # invoke gcc -v --version
