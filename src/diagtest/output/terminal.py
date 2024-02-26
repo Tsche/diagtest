@@ -57,7 +57,7 @@ class TerminalPrinter:
             print()
 
     def print_suite(self, suite: TestSuiteResult):
-        print(f"File {suite.source_file}")
+        print(f"File {suite.source_file.name}")
         for test in suite:
             self.print_test(test)
 

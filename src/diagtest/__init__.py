@@ -1,6 +1,8 @@
 import logging
 from typing import Optional
 from pathlib import Path
+from tempfile import TemporaryDirectory
+from contextlib import nullcontext
 import click
 
 from diagtest.log import setup_logger
@@ -48,8 +50,10 @@ def main(files: list[Path], sort_by_assertion: bool, list_compilers: bool = Fals
         from diagtest.output.json import JSONPrinter
         printers.append(JSONPrinter(json))
 
-    runner = Runner(list(files), output, language)
-    results = list(runner.run())
+    with nullcontext(output) if output is not None else TemporaryDirectory() as out_path:
+        runner = Runner(list(files), Path(out_path), language)
+        results = list(runner.run())
+
     for printer in printers:
         printer.print(results)
 
