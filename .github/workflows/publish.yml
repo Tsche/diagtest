@@ -78,15 +78,6 @@ jobs:
           ./dist/*.tar.gz
           ./dist/*.whl
 
-    - name: Create GitHub Release
-      env:
-        GITHUB_TOKEN: ${{ github.token }}
-      run: >-
-        gh release create
-        '${{ github.ref_name }}'
-        --repo '${{ github.repository }}'
-        --notes ""
-
     - name: Upload artifact signatures to GitHub Release
       env:
         GITHUB_TOKEN: ${{ github.token }}
@@ -94,6 +85,6 @@ jobs:
       # `dist/` contains the built packages, and the
       # sigstore-produced signatures and certificates.
       run: >-
-        gh release upload
+        gh release upload --clobber 
         '${{ github.ref_name }}' dist/**
         --repo '${{ github.repository }}'
